@@ -446,18 +446,35 @@ function scheduleRerender() {
     if (drawerTask && !document.activeElement?.closest(".drawer")) openTask(drawerTask);
   }, 400);
 }
+function onEvents(evs) {
+  if (!evs.length) return;
+  evs.forEach((e) => { freshIds.add(e.id); setTimeout(() => freshIds.delete(e.id), 3000); });
+  scheduleRerender();
+}
+async function startLive() {
+  const cfg = await api("/config").catch(() => ({ stream: true }));
+  if (cfg.stream) return connectStream();
+  // Serverless hosting: poll for new events instead of holding a stream open.
+  let last = (await api("/stats")).last_event_id;
+  $("#liveDot").classList.add("on"); $("#liveText").textContent = "Live (polling)";
+  setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const evs = await api(`/events?since=${last}&limit=200`);
+      if (evs.length) last = evs[0].id;
+      onEvents(evs.reverse());
+      $("#liveDot").classList.add("on");
+    } catch { $("#liveDot").classList.remove("on"); }
+  }, 3000);
+}
 function connectStream() {
   const es = new EventSource("/api/stream");
   es.addEventListener("hello", () => { $("#liveDot").classList.add("on"); $("#liveText").textContent = "Live"; });
-  es.addEventListener("events", (m) => {
-    const evs = JSON.parse(m.data);
-    evs.forEach((e) => { freshIds.add(e.id); setTimeout(() => freshIds.delete(e.id), 3000); });
-    scheduleRerender();
-  });
+  es.addEventListener("events", (m) => onEvents(JSON.parse(m.data)));
   es.onerror = () => { $("#liveDot").classList.remove("on"); $("#liveText").textContent = "Reconnecting…"; };
 }
 
 window.addEventListener("hashchange", render);
 render();
-connectStream();
+startLive();
 setInterval(() => { if (!document.hidden) scheduleRerender(); }, 30000); // refresh "x ago" and offline detection

@@ -90,9 +90,9 @@ def main():
     ap.add_argument("--seed-only", action="store_true")
     ap.add_argument("--db")
     a = ap.parse_args()
-    path = os.path.abspath(a.db) if a.db else db.DB_PATH
+    path = os.path.abspath(a.db) if a.db else None
     seed(db.connect(path))
-    print(f"Seeded {path}")
+    print("Seeded", path or os.environ.get("TURSO_DATABASE_URL") or db.DB_PATH)
     if a.seed_only:
         return
     procs = [mp.Process(target=run_agent, args=(n, path), daemon=True) for n, _ in AGENTS]

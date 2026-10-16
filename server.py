@@ -23,9 +23,21 @@ STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _local = threading.local()
 
 
+# Serverless hosts (Vercel) can't hold a stream open; the UI polls instead.
+STREAMING = not os.environ.get("VERCEL")
+_init_lock = threading.Lock()
+_initialized = False
+
+
 def conn():
+    global _initialized
     if not hasattr(_local, "conn"):
         _local.conn = db.connect()
+    if not _initialized:
+        with _init_lock:
+            if not _initialized:
+                db.init(_local.conn)
+                _initialized = True
     return _local.conn
 
 
@@ -41,6 +53,11 @@ def route(method, pattern):
 
 def agent_of(req, body):
     return body.get("agent") or req.headers.get("X-Agent")
+
+
+@route("GET", r"/api/config")
+def _config(req, q, body):
+    return {"stream": STREAMING}
 
 
 @route("GET", r"/api/stats")
@@ -177,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if method == "GET" and url.path == "/api/stream":
+        if method == "GET" and url.path == "/api/stream" and STREAMING:
             return self._stream()
         if method == "GET" and not url.path.startswith("/api/"):
             return self._static(url.path)

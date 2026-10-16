@@ -1,9 +1,9 @@
 """SQLite data layer shared by the HTTP server, the CLI and the MCP server.
 
-SQLite runs in WAL mode: any number of readers work concurrently with one
-writer, and writers queue on a busy timeout instead of failing. That lets many
-agent processes read and write the same file at the same time, either through
-the HTTP API or by importing this module directly.
+Locally, SQLite runs in WAL mode: any number of readers work concurrently with
+one writer, and writers queue on a busy timeout instead of failing, so many
+agent processes can share the same file. On Vercel the same SQL runs against
+Turso (hosted libSQL) through turso.py.
 """
 import json
 import os
@@ -90,6 +90,10 @@ class Invalid(Exception):
 
 
 def connect(path=None):
+    """Local SQLite file by default; Turso when TURSO_DATABASE_URL is set (Vercel)."""
+    if os.environ.get("TURSO_DATABASE_URL") and path is None:
+        import turso
+        return turso.connect()
     path = path or DB_PATH
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)

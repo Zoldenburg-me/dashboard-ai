@@ -1,0 +1,21 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Start local libSQL server for the Turso tests
+        run: |
+          curl -sSfL https://get.tur.so/install.sh | bash
+          ~/.turso/sqld --http-listen-addr 127.0.0.1:8080 -d "$RUNNER_TEMP/sqld" &
+          for i in $(seq 30); do curl -sf -XPOST localhost:8080/v2/pipeline -d '{"requests":[]}' && break; sleep 1; done
+      - run: python -m unittest discover -s tests -v
+        env:
+          TURSO_DATABASE_URL: http://127.0.0.1:8080
