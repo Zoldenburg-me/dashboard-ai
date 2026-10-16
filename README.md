@@ -49,11 +49,11 @@ Point at a different file with `--db PATH` or `AGENT_DB=PATH`. For a hosted dash
 
 ### 2. MCP server: Claude Code and other MCP clients
 ```bash
-claude mcp add agent-tracker -e AGENT_NAME=backend-bot -- python3 /abs/path/agent-dashboard/mcp_server.py
-# hosted dashboard:
-claude mcp add agent-tracker -e AGENT_NAME=backend-bot -e AGENT_DASH_URL=https://your-host -e AGENT_DASH_TOKEN=... \
-  -- python3 /abs/path/agent-dashboard/mcp_server.py
+# hosted dashboard, registered once for every folder:
+claude mcp add agent-tracker --scope user -e AGENT_DASH_URL=https://your-host -e AGENT_DASH_TOKEN=... \
+  -- python3 /abs/path/dashboard-ai/mcp_server.py
 ```
+The agent name is the folder Claude Code runs in (`~/code/zold-app` → `zold-app`), so each project folder is its own agent. Set `-e AGENT_NAME=...` to choose a fixed name instead.
 Tools: `tracker_heartbeat` (status, model, host, parent, metrics), `tracker_report_host`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
 
 ### 3. HTTP API: agents on other machines

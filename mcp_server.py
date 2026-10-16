@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Minimal MCP (stdio, JSON-RPC 2.0) server exposing the tracker as tools.
 
-Register with Claude Code:
-  claude mcp add agent-tracker -e AGENT_NAME=backend-bot -- python3 /path/to/agent-dashboard/mcp_server.py
+Register once for every folder with Claude Code:
+  claude mcp add agent-tracker --scope user -- python3 /path/to/dashboard-ai/mcp_server.py
 
-Every agent runs its own copy; they all share the same SQLite file.
+The agent name is AGENT_NAME if set, otherwise the name of the folder Claude Code
+was started in, so each project folder shows up as its own agent.
+Every agent runs its own copy; they all share the same database.
 """
 import json
 import os
@@ -16,7 +18,9 @@ if os.environ.get("AGENT_DASH_URL"):
 else:
     import db  # noqa: E402
 
-ME = os.environ.get("AGENT_NAME", "mcp-agent")
+ME = (os.environ.get("AGENT_NAME")
+      or os.path.basename(os.path.normpath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+      or "mcp-agent")
 
 
 def S(props, required=()):
