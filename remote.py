@@ -59,8 +59,9 @@ def get_project(conn, ref):
     return _call("GET", f"/api/projects/{_q(ref)}")
 
 
-def create_project(conn, name, description="", status="active", agent=None):
-    return _call("POST", "/api/projects", {"name": name, "description": description, "status": status}, agent=agent)
+def create_project(conn, name, description="", status="active", agent=None, repo="", branch=""):
+    return _call("POST", "/api/projects", {"name": name, "description": description, "status": status,
+                                           "repo": repo, "branch": branch}, agent=agent)
 
 
 def update_project(conn, ref, agent=None, **fields):
@@ -71,8 +72,17 @@ def get_agent(conn, ref):
     return _call("GET", f"/api/agents/{_q(ref)}")
 
 
-def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None):
-    return _call("POST", f"/api/agents/{_q(agent)}/heartbeat", _clean({"status": status, "note": note, "role": role, "task_id": task_id}))
+def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None, model=None, host=None, parent=None, metrics=None):
+    return _call("POST", f"/api/agents/{_q(agent)}/heartbeat", _clean({"status": status, "note": note, "role": role, "task_id": task_id,
+                                                                       "model": model, "host": host, "parent": parent, "metrics": metrics}))
+
+
+def report_host(conn, name, **stats):
+    return _call("POST", f"/api/hosts/{_q(name)}", _clean(stats))
+
+
+def list_hosts(conn):
+    return _call("GET", "/api/hosts")
 
 
 def claim_next_task(conn, agent, project=None):

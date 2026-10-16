@@ -5,7 +5,8 @@ works with or without the server running, from any number of processes.
 Identify yourself with --agent NAME or the AGENT_NAME env var. Output is JSON.
 For a hosted dashboard set AGENT_DASH_URL (and AGENT_DASH_TOKEN) to go over HTTP.
 
-  agentctl.py hb --status working --note "reading codebase"
+  agentctl.py hb --status working --note "reading codebase" --model claude-sonnet --metric tokens_per_sec=84
+  agentctl.py host report --auto            # this machine's GPU/VRAM/RAM/CPU (run every minute or so)
   agentctl.py project add web-app --desc "Customer portal"
   agentctl.py task add web-app "Add login page" --priority high --todo "form" --todo "validation"
   agentctl.py task claim --project web-app
@@ -27,6 +28,24 @@ else:
     import db  # noqa: E402
 
 
+def num(v):
+    """CLI values arrive as strings; keep numbers numeric so the dashboard can chart them."""
+    try:
+        return int(v) if str(v).lstrip("-").isdigit() else float(v)
+    except (TypeError, ValueError):
+        return v
+
+
+def parse_metrics(pairs):
+    out = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"--metric expects KEY=VALUE, got {pair!r}")
+        k, v = pair.split("=", 1)
+        out[k.strip()] = num(v.strip()) if v.strip() else None
+    return out or None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="agentctl", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--agent", default=os.environ.get("AGENT_NAME"), help="your agent name (or $AGENT_NAME)")
@@ -38,12 +57,27 @@ def main(argv=None):
     hb.add_argument("--note")
     hb.add_argument("--role")
     hb.add_argument("--task", type=int, help="current task id (0 to clear)")
+    hb.add_argument("--model", help="model the agent runs on, e.g. claude-sonnet, qwen-2.5-coder")
+    hb.add_argument("--host", help="machine the agent runs on (matches `host report` names)")
+    hb.add_argument("--parent", help="lead agent this one works under ('' to clear)")
+    hb.add_argument("--metric", action="append", default=[], metavar="KEY=VALUE",
+                    help="e.g. vram_gb=4.8, tokens_per_sec=84, context_used=14200, context_max=128000, quant=Q4_K_M")
+
+    hs = sub.add_parser("host").add_subparsers(dest="sub", required=True)
+    p = hs.add_parser("report", help="report a machine's hardware stats")
+    p.add_argument("name", nargs="?", help="host name (default: this machine's hostname)")
+    p.add_argument("--auto", action="store_true", help="read stats from this machine (nvidia-smi, /proc/meminfo, load)")
+    for f in db.HOST_FIELDS:
+        p.add_argument("--" + f.replace("_", "-"), dest=f)
+    hs.add_parser("list")
 
     pr = sub.add_parser("project").add_subparsers(dest="sub", required=True)
     p = pr.add_parser("add"); p.add_argument("name"); p.add_argument("--desc", default="")
+    p.add_argument("--repo", default="", help="git repo, e.g. github.com/org/name"); p.add_argument("--branch", default="")
     pr.add_parser("list")
     p = pr.add_parser("show"); p.add_argument("ref")
     p = pr.add_parser("set"); p.add_argument("ref"); p.add_argument("--status", choices=db.PROJECT_STATUSES); p.add_argument("--desc"); p.add_argument("--name")
+    p.add_argument("--repo"); p.add_argument("--branch")
 
     tk = sub.add_parser("task").add_subparsers(dest="sub", required=True)
     p = tk.add_parser("add"); p.add_argument("project"); p.add_argument("title"); p.add_argument("--desc", default="")
@@ -84,13 +118,22 @@ def main(argv=None):
     sc = getattr(a, "sub", None)
     try:
         if a.cmd == "hb":
-            out = db.heartbeat(c, need_agent(), a.status, a.note, a.role, a.task)
+            out = db.heartbeat(c, need_agent(), a.status, a.note, a.role, a.task, a.model, a.host, a.parent, parse_metrics(a.metric))
             out.pop("events", None)
+        elif a.cmd == "host":
+            if sc == "list":
+                out = db.list_hosts(c)
+            else:
+                import hoststats
+                stats = hoststats.collect() if a.auto else {}
+                stats.update({f: num(getattr(a, f)) for f in db.HOST_FIELDS if getattr(a, f) is not None})
+                out = db.report_host(c, a.name or hoststats.hostname(), **stats)
         elif a.cmd == "project":
-            out = {"add": lambda: db.create_project(c, a.name, a.desc, agent=me),
+            out = {"add": lambda: db.create_project(c, a.name, a.desc, agent=me, repo=a.repo, branch=a.branch),
                    "list": lambda: db.list_projects(c),
                    "show": lambda: db.get_project(c, a.ref),
-                   "set": lambda: db.update_project(c, a.ref, me, name=a.name, description=a.desc, status=a.status)}[sc]()
+                   "set": lambda: db.update_project(c, a.ref, me, name=a.name, description=a.desc, status=a.status,
+                                                    repo=a.repo, branch=a.branch)}[sc]()
         elif a.cmd == "task":
             if sc == "add":
                 out = db.create_task(c, a.project, a.title, a.desc, a.priority, need_agent() if a.mine else a.assignee, a.status, me, a.todo)

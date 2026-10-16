@@ -1,4 +1,4 @@
-# Agent Command — agent & project dashboard
+# Synapse Local // Agent Control Center
 
 A live dashboard showing what every agent is doing on every project, with each task, todo and progress note recorded as it happens.
 
@@ -18,13 +18,14 @@ python3 -m unittest discover -s tests -v   # Turso tests also run if TURSO_DATAB
 
 | Table      | What it holds |
 |------------|---------------|
-| `projects` | name, description, status (`active/paused/completed/archived`) |
-| `agents`   | name, role, status (`idle/working/blocked`), status note, current task, last heartbeat. Agents count as offline after 5 minutes without any write. |
+| `projects` | name, description, status (`active/paused/completed/archived`), git repo, branch |
+| `agents`   | name, role, status (`idle/working/blocked`), status note, current task, model, host, lead agent (cluster), metrics (`vram_gb`, `tokens_per_sec`, `context_used`, `context_max`, `quant`, …), last heartbeat. Agents count as offline after 5 minutes without any write. |
+| `hosts`    | per machine: `gpu`, `engine`, `vram_used_gb`, `vram_total_gb`, `ram_used_gb`, `ram_total_gb`, `cpu_pct`, `tokens_per_sec`, `temp_c`, `power_w`, last report |
 | `tasks`    | project, title, description, status (`todo/in_progress/blocked/review/done`), priority (`low/medium/high/urgent`), assignee, timestamps |
 | `todos`    | checklist items on a task |
 | `events`   | append-only log of every change: the activity feed and audit trail |
 
-Projects, agents, tasks and todos hold only the current state and are overwritten in place. History lives only in `events`.
+Projects, agents, hosts, tasks and todos hold only the current state and are overwritten in place. History lives only in `events`.
 
 Agents register automatically the first time they write under a new name.
 
@@ -33,7 +34,9 @@ Agents register automatically the first time they write under a new name.
 ### 1. CLI (`agentctl.py`): simplest option, no server needed
 ```bash
 export AGENT_NAME=backend-bot           # or --agent backend-bot
-python3 agentctl.py hb --status working --role "Backend engineer" --note "starting"
+python3 agentctl.py hb --status working --role "Backend engineer" --note "starting" \
+    --model qwen-2.5-coder --host workstation-01 --parent claudia --metric vram_gb=6.2 --metric tokens_per_sec=84
+python3 agentctl.py host report --auto            # GPU/VRAM via nvidia-smi, RAM, CPU load of this machine
 python3 agentctl.py task claim --project data-pipeline     # atomic: no two agents get the same task
 python3 agentctl.py task add data-pipeline "Add retries" --priority high --todo "backoff" --todo "DLQ" --mine
 python3 agentctl.py task log 7 "Implemented exponential backoff"
@@ -51,7 +54,7 @@ claude mcp add agent-tracker -e AGENT_NAME=backend-bot -- python3 /abs/path/agen
 claude mcp add agent-tracker -e AGENT_NAME=backend-bot -e AGENT_DASH_URL=https://your-host -e AGENT_DASH_TOKEN=... \
   -- python3 /abs/path/agent-dashboard/mcp_server.py
 ```
-Tools: `tracker_heartbeat`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
+Tools: `tracker_heartbeat` (status, model, host, parent, metrics), `tracker_report_host`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
 
 ### 3. HTTP API: agents on other machines
 Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
@@ -59,10 +62,12 @@ Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
 | Method | Path | Body / query |
 |---|---|---|
 | GET  | `/api/stats` | |
-| GET/POST | `/api/projects` | `{name, description}` |
-| GET/PATCH | `/api/projects/{id or name}` | `{status, description, name}` |
+| GET/POST | `/api/projects` | `{name, description, repo, branch}` |
+| GET/PATCH | `/api/projects/{id or name}` | `{status, description, name, repo, branch}` |
 | GET  | `/api/agents`, `/api/agents/{id or name}` | |
-| POST | `/api/agents/{name}/heartbeat` | `{status, note, role, task_id}` |
+| POST | `/api/agents/{name}/heartbeat` | `{status, note, role, task_id, model, host, parent, metrics: {}}` |
+| GET  | `/api/hosts` | |
+| POST | `/api/hosts/{name}` | `{gpu, engine, vram_used_gb, vram_total_gb, ram_used_gb, ram_total_gb, cpu_pct, tokens_per_sec, temp_c, power_w}` |
 | POST | `/api/agents/{name}/claim` | `{project}` |
 | GET  | `/api/tasks` | `?project=&status=todo,in_progress&assignee=` |
 | POST | `/api/tasks` | `{project, title, description, priority, assignee, status, todos: []}` |
@@ -80,7 +85,8 @@ curl -X POST localhost:8787/api/tasks/7/progress -H 'X-Agent: backend-bot' -d '{
 ### Suggested agent instructions (paste into CLAUDE.md / AGENTS.md)
 ```
 Track all your work in the agent tracker (agentctl.py or the tracker_* MCP tools):
-- At start: heartbeat with status=working. Claim a task or create one for the work you were given.
+- At start: heartbeat with status=working, your model, host and lead agent (if any). Claim a task or create one for the work you were given.
+- Include metrics you know (vram_gb, tokens_per_sec, context_used, context_max) in heartbeats.
 - Before creating a task, list existing tasks; never create a second task for the same work.
 - Record every new piece of work as a task (or a todo on your current task) as soon as you identify it.
 - Task title, description, status and priority always state the current truth. When a fact changes,
@@ -112,10 +118,20 @@ docker run -d -p 8080:8080 -v agent-data:/data -e AGENT_DASH_TOKEN=... agent-das
 ```
 Put it behind HTTPS (Caddy, nginx or the platform's TLS) so the token isn't sent in clear text. With a local SQLite file, run one instance only. Setting `TURSO_DATABASE_URL` stores the data in Turso instead.
 
-## Applying your Stitch design
-All colours, radii and fonts are CSS variables at the top of `static/styles.css`. To match your Google Stitch project:
-1. In Stitch, open the screen and choose **Export → Code**.
-2. Copy the colour roles from its `tailwind.config` (primary, surface, background, and so on) into the `:root` variables. Then adjust the layout classes in `styles.css` and the templates in `static/app.js` (`viewOverview`, `viewProject`, etc.) to match its structure.
+## Screens
+The UI is built from the Google Stitch export "Local AI Agent Control Center" (Bauhaus neo-brutalist design system: Tailwind config in `static/index.html`, extras in `static/styles.css`). Every number comes from the tracker; panels whose data hasn't been reported say so instead of showing sample values.
+
+| Module | Shows | Data source |
+|---|---|---|
+| 01 // Projects & Kanban | project cards with sprint progress, instant dispatch, filters, 5-column sprint board (drag to change status), filtered empty state, stdout bus | projects, tasks, events |
+| Project board + task inspector | per-project board, throughput, task drawer with milestones and the task's stdout | tasks, todos, events, agent metrics |
+| 02 // Agent Fleet | clusters (lead + sub-agents), blocked-agent alert, agent inspector | agents (`parent`, `model`, `metrics`) |
+| 03 // Task Dispatch | dispatch composer (priority P0–P3, auto/manual routing, milestones), live streams with inject/abort, load balancer, repo queue grid | tasks, agents, projects |
+| 04 // Compute & VRAM | host VRAM/RAM/tokens/thermals, per-agent allocation matrix, VRAM quota, recommendations | hosts, agent metrics |
+| 05 // Repositories | projects with linked repos, projects awaiting one | projects (`repo`, `branch`) |
+| 06 // Agent Dex | collectible-card view of each agent: level = tasks completed, velocity, completion rate | agents |
+
+Priorities map to Stitch's levels: `urgent` = P0 Critical, `high` = P1, `medium` = P2, `low` = P3.
 
 ## Concurrency notes
 - Each write runs in a `BEGIN IMMEDIATE` transaction. Concurrent writers wait their turn (`busy_timeout=30s` locally, retry with backoff on Turso) and never error. `claim_next_task` is atomic. `tests/test_concurrency.py` checks this with 12 processes on a local file, and `tests/test_turso.py` with 6 processes on libSQL.

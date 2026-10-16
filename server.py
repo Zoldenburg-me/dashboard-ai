@@ -11,7 +11,7 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import db
 
@@ -57,7 +57,7 @@ def agent_of(req, body):
 
 @route("GET", r"/api/config")
 def _config(req, q, body):
-    return {"stream": STREAMING}
+    return {"stream": STREAMING, "store": "turso" if os.environ.get("TURSO_DATABASE_URL") else "sqlite"}
 
 
 @route("GET", r"/api/stats")
@@ -72,7 +72,8 @@ def _projects(req, q, body):
 
 @route("POST", r"/api/projects")
 def _create_project(req, q, body):
-    return db.create_project(conn(), body.get("name"), body.get("description", ""), body.get("status", "active"), agent_of(req, body))
+    return db.create_project(conn(), body.get("name"), body.get("description", ""), body.get("status", "active"), agent_of(req, body),
+                             body.get("repo", ""), body.get("branch", ""))
 
 
 @route("GET", r"/api/projects/(?P<ref>[^/]+)")
@@ -82,7 +83,7 @@ def _project(req, q, body, ref):
 
 @route("PATCH", r"/api/projects/(?P<ref>[^/]+)")
 def _update_project(req, q, body, ref):
-    return db.update_project(conn(), ref, agent_of(req, body), name=body.get("name"), description=body.get("description"), status=body.get("status"))
+    return db.update_project(conn(), ref, agent_of(req, body), **{k: body.get(k) for k in ("name", "description", "status", "repo", "branch")})
 
 
 @route("GET", r"/api/agents")
@@ -97,12 +98,23 @@ def _agent(req, q, body, ref):
 
 @route("POST", r"/api/agents/(?P<ref>[^/]+)/heartbeat")
 def _heartbeat(req, q, body, ref):
-    return db.heartbeat(conn(), ref, body.get("status"), body.get("note"), body.get("role"), body.get("task_id"))
+    return db.heartbeat(conn(), ref, body.get("status"), body.get("note"), body.get("role"), body.get("task_id"),
+                        body.get("model"), body.get("host"), body.get("parent"), body.get("metrics"))
 
 
 @route("POST", r"/api/agents/(?P<ref>[^/]+)/claim")
 def _claim(req, q, body, ref):
     return db.claim_next_task(conn(), ref, body.get("project"))
+
+
+@route("GET", r"/api/hosts")
+def _hosts(req, q, body):
+    return db.list_hosts(conn())
+
+
+@route("POST", r"/api/hosts/(?P<name>[^/]+)")
+def _report_host(req, q, body, name):
+    return db.report_host(conn(), name, **body)
 
 
 @route("GET", r"/api/tasks")
@@ -210,7 +222,8 @@ class Handler(BaseHTTPRequestHandler):
             match = rx.match(url.path)
             if m == method and match:
                 try:
-                    return self._send(200, fn(self, q, body, **match.groupdict()))
+                    args = {k: unquote(v) for k, v in match.groupdict().items()}
+                    return self._send(200, fn(self, q, body, **args))
                 except db.NotFound as e:
                     return self._send(404, {"error": str(e)})
                 except db.Invalid as e:
@@ -289,7 +302,8 @@ def main():
     srv.daemon_threads = True
     if args.host not in ("127.0.0.1", "localhost") and not TOKEN:
         print("WARNING: listening publicly without AGENT_DASH_TOKEN; anyone can read and write.")
-    print(f"Agent dashboard on http://{args.host}:{args.port}  (db: {db.DB_PATH}, auth: {'on' if TOKEN else 'off'})")
+    store = os.environ.get("TURSO_DATABASE_URL") or db.DB_PATH
+    print(f"Agent dashboard on http://{args.host}:{args.port}  (db: {store}, auth: {'on' if TOKEN else 'off'})")
     srv.serve_forever()
 
 

@@ -27,12 +27,21 @@ STR, INT = {"type": "string"}, {"type": "integer"}
 ENUM = lambda vals: {"type": "string", "enum": list(vals)}
 
 TOOLS = {
-    "tracker_heartbeat": ("Report you are alive and what you are doing. Call at the start of work and when your status changes.",
-                          S({"status": ENUM(db.AGENT_STATUSES), "note": STR, "role": STR}),
-                          lambda c, a: db.heartbeat(c, ME, a.get("status"), a.get("note"), a.get("role"))),
+    "tracker_heartbeat": ("Report you are alive and what you are doing. Call at the start of work and when your status changes. "
+                          "Optionally report the model you run on, your host machine, the lead agent you work under, and metrics "
+                          "such as tokens_per_sec, vram_gb, context_used, context_max, quant.",
+                          S({"status": ENUM(db.AGENT_STATUSES), "note": STR, "role": STR, "model": STR, "host": STR, "parent": STR,
+                             "metrics": {"type": "object"}}),
+                          lambda c, a: db.heartbeat(c, ME, a.get("status"), a.get("note"), a.get("role"), None,
+                                                    a.get("model"), a.get("host"), a.get("parent"), a.get("metrics"))),
+    "tracker_report_host": ("Report a machine's hardware stats (all optional): " + ", ".join(db.HOST_FIELDS) + ".",
+                            S({"name": STR, **{f: STR if f in ("gpu", "engine") else {"type": "number"} for f in db.HOST_FIELDS}}, ["name"]),
+                            lambda c, a: db.report_host(c, a["name"], **{k: v for k, v in a.items() if k != "name"})),
     "tracker_list_projects": ("List projects with task counts.", S({}), lambda c, a: db.list_projects(c)),
-    "tracker_create_project": ("Create a project.", S({"name": STR, "description": STR}, ["name"]),
-                               lambda c, a: db.create_project(c, a["name"], a.get("description", ""), agent=ME)),
+    "tracker_create_project": ("Create a project, optionally linked to a git repo and branch.",
+                               S({"name": STR, "description": STR, "repo": STR, "branch": STR}, ["name"]),
+                               lambda c, a: db.create_project(c, a["name"], a.get("description", ""), agent=ME,
+                                                              repo=a.get("repo", ""), branch=a.get("branch", ""))),
     "tracker_list_tasks": ("List tasks. status may be comma-separated, e.g. 'todo,in_progress'. mine=true for your own tasks.",
                            S({"project": STR, "status": STR, "mine": {"type": "boolean"}}),
                            lambda c, a: db.list_tasks(c, a.get("project"), a.get("status"), ME if a.get("mine") else None)),

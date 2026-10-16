@@ -3,55 +3,75 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Command Center</title>
+<title>Synapse Local // Agent Control Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300..500,0..1,0&display=block" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
+<!-- Design system exported from Google Stitch ("Bauhaus — Neo-Brutalist"). -->
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        "inverse-on-surface": "#f5f0e8", "error": "#cc0000", "secondary-fixed": "#ffdad6", "on-secondary": "#1a1a1a",
+        "outline-variant": "#d0cbc3", "secondary": "#e63b2e", "surface-dim": "#d6d1c9", "primary": "#1a1a1a",
+        "surface-variant": "#e8e3da", "surface-container-high": "#e8e3da", "on-error-container": "#93000a",
+        "primary-fixed-dim": "#e6b800", "on-surface": "#1a1a1a", "error-container": "#ffdad6", "tertiary-container": "#d6e3ff",
+        "primary-fixed": "#ffcc00", "tertiary-fixed": "#d6e3ff", "background": "#f5f0e8", "on-primary": "#ffffff",
+        "surface-container-lowest": "#ffffff", "inverse-primary": "#f5f0e8", "on-tertiary": "#ffffff", "on-primary-fixed": "#1a1a1a",
+        "secondary-container": "#ffdad6", "on-error": "#ffffff", "surface-container-low": "#f2ede5", "surface-bright": "#faf7f2",
+        "inverse-surface": "#1a1a1a", "tertiary-fixed-dim": "#a8c6ff", "secondary-fixed-dim": "#ffb3ab", "tertiary": "#0055ff",
+        "primary-container": "#ffcc00", "on-primary-container": "#1a1a1a", "surface-container": "#eee9e0",
+        "on-surface-variant": "#4a4a4a", "surface": "#f5f0e8", "surface-container-highest": "#e2ddd4", "outline": "#1a1a1a"
+      },
+      borderRadius: { DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "9999px" },
+      fontFamily: { headline: ["Space Grotesk"], display: ["Space Grotesk"], body: ["Inter"], label: ["Space Grotesk"],
+                    mono: ["JetBrains Mono", "ui-monospace", "monospace"] },
+    },
+  },
+};
+</script>
 <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-<div class="shell">
-  <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <div class="brand-mark"><span class="ms">hub</span></div>
-      <div>
-        <div class="brand-name">Agent Command</div>
-        <div class="brand-sub">Projects &amp; work tracker</div>
-      </div>
+<body class="bg-surface font-body text-on-surface antialiased">
+<header class="fixed top-0 left-0 right-0 h-16 z-50 bg-surface border-b-2 border-primary flex items-center justify-between gap-3 px-3 lg:px-6">
+  <div class="flex items-center gap-3 min-w-0">
+    <button id="menuBtn" class="lg:hidden p-1.5 border-2 border-primary" aria-label="Menu"><span class="material-symbols-outlined text-base">menu</span></button>
+    <div class="w-9 h-9 bg-primary text-primary-fixed grid place-items-center shrink-0"><span class="material-symbols-outlined">adjust</span></div>
+    <div class="flex flex-col min-w-0">
+      <span class="font-headline font-bold text-xs sm:text-sm lg:text-base tracking-tight uppercase truncate">Synapse Local // Agent Control Center</span>
+      <div class="flex items-center gap-2"><span id="onlineDot" class="inline-block w-2 h-2 rounded-full bg-on-surface-variant"></span><span id="onlineText" class="font-label text-[10px] tracking-wider uppercase font-bold text-on-surface-variant truncate">Connecting…</span></div>
     </div>
-    <nav class="nav">
-      <a href="#/" data-nav="overview"><span class="ms">space_dashboard</span>Overview</a>
-      <a href="#/projects" data-nav="projects"><span class="ms">folder_open</span>Projects</a>
-      <a href="#/agents" data-nav="agents"><span class="ms">smart_toy</span>Agents</a>
-      <a href="#/tasks" data-nav="tasks"><span class="ms">checklist</span>Tasks</a>
-      <a href="#/activity" data-nav="activity"><span class="ms">timeline</span>Activity</a>
-    </nav>
-    <div class="nav-section">Projects</div>
-    <div class="nav-projects" id="navProjects"></div>
-    <div class="sidebar-foot">
-      <span class="live-dot" id="liveDot"></span><span id="liveText">Connecting…</span>
-    </div>
-  </aside>
+  </div>
+  <div id="hwChips" class="hidden xl:flex items-center gap-2"></div>
+  <div class="flex items-center gap-2 shrink-0">
+    <a href="#/repos" id="repoChip" class="hidden md:flex items-center gap-1 px-3 py-1 bg-surface-container border-2 border-primary text-xs font-label font-bold uppercase"><span class="material-symbols-outlined text-sm">folder_managed</span><span id="repoChipText">Repos</span></a>
+    <button id="newProjectBtn" class="flex items-center gap-1 px-3 py-1 bg-primary-container border-2 border-primary font-label text-xs font-bold uppercase shadow-[2px_2px_0px_0px_#1a1a1a] hover:bg-primary hover:text-on-primary transition-colors"><span class="material-symbols-outlined text-sm">add_box</span><span class="hidden sm:inline">New Project</span></button>
+  </div>
+</header>
 
-  <main class="main">
-    <header class="topbar">
-      <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu"><span class="ms">menu</span></button>
-      <div class="crumbs" id="crumbs"></div>
-      <div class="topbar-actions">
-        <div class="search"><span class="ms">search</span><input id="search" placeholder="Search tasks…" autocomplete="off"></div>
-        <button class="btn btn-ghost" id="newProjectBtn"><span class="ms">create_new_folder</span><span class="hide-sm">Project</span></button>
-        <button class="btn btn-primary" id="newTaskBtn"><span class="ms">add</span><span class="hide-sm">New task</span></button>
-      </div>
-    </header>
-    <div class="content" id="view"></div>
-  </main>
+<div id="navBackdrop" class="fixed inset-0 bg-primary/40 z-30 hidden lg:hidden"></div>
+<aside id="sidebar" class="fixed left-0 top-16 bottom-0 w-64 bg-surface border-r-2 border-primary z-40 flex flex-col justify-between overflow-y-auto -translate-x-full lg:translate-x-0 transition-transform">
+  <div class="p-4">
+    <div class="text-[10px] font-label font-bold uppercase tracking-widest text-on-surface-variant mb-3 px-2">Navigation Modules</div>
+    <nav id="nav" class="flex flex-col gap-2"></nav>
+  </div>
+  <div class="p-4 border-t-2 border-primary bg-surface-container-low">
+    <div class="text-[10px] font-label font-bold uppercase tracking-wider mb-2">Node Environment</div>
+    <div id="nodeEnv" class="text-xs font-mono bg-surface border border-primary p-2 flex flex-col gap-1"></div>
+  </div>
+</aside>
+
+<div class="lg:pl-64">
+  <main id="view" class="relative pt-16 bg-surface min-h-screen"></main>
 </div>
 
-<div class="drawer-backdrop" id="drawerBackdrop"></div>
-<aside class="drawer" id="drawer" aria-hidden="true"></aside>
-
-<dialog id="modal"></dialog>
-<div class="toast" id="toast"></div>
+<div id="drawerBackdrop" class="fixed inset-0 bg-primary/30 z-50 hidden"></div>
+<aside id="drawer" class="fixed top-0 right-0 bottom-0 w-full sm:w-[560px] z-50 bg-surface border-l-2 border-primary overflow-y-auto translate-x-full transition-transform"></aside>
+<div id="modalRoot"></div>
+<div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 border-2 border-primary bg-primary-container font-label font-bold text-xs uppercase shadow-[3px_3px_0_0_#1a1a1a] hidden"></div>
 
 <script src="/app.js"></script>
 </body>

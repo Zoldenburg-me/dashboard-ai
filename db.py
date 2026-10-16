@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS projects (
     name        TEXT NOT NULL UNIQUE,
     description TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT 'active',
+    repo        TEXT NOT NULL DEFAULT '',
+    branch      TEXT NOT NULL DEFAULT '',
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
@@ -35,6 +37,10 @@ CREATE TABLE IF NOT EXISTS agents (
     status          TEXT NOT NULL DEFAULT 'idle',
     status_note     TEXT NOT NULL DEFAULT '',
     current_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    model           TEXT NOT NULL DEFAULT '',
+    host            TEXT NOT NULL DEFAULT '',
+    parent_id       INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    metrics         TEXT NOT NULL DEFAULT '{}',
     last_seen       REAL,
     created_at      REAL NOT NULL
 );
@@ -72,6 +78,12 @@ CREATE TABLE IF NOT EXISTS events (
     message    TEXT NOT NULL DEFAULT '',
     data       TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS hosts (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL UNIQUE,
+    data      TEXT NOT NULL DEFAULT '{}',
+    last_seen REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_todos_task ON todos(task_id, position);
@@ -105,11 +117,30 @@ def connect(path=None):
     return conn
 
 
+# Columns added after the first release; init() adds any that an older database lacks.
+MIGRATIONS = [
+    ("projects", "repo", "TEXT NOT NULL DEFAULT ''"),
+    ("projects", "branch", "TEXT NOT NULL DEFAULT ''"),
+    ("agents", "model", "TEXT NOT NULL DEFAULT ''"),
+    ("agents", "host", "TEXT NOT NULL DEFAULT ''"),
+    ("agents", "parent_id", "INTEGER REFERENCES agents(id) ON DELETE SET NULL"),
+    ("agents", "metrics", "TEXT NOT NULL DEFAULT '{}'"),
+]
+
+# Numeric host stats an agent or script can report (all optional).
+HOST_FIELDS = ("gpu", "engine", "vram_used_gb", "vram_total_gb", "ram_used_gb", "ram_total_gb",
+               "cpu_pct", "tokens_per_sec", "temp_c", "power_w")
+
+
 def init(conn):
     with write(conn):
         for stmt in SCHEMA.split(";"):
             if stmt.strip():
                 conn.execute(stmt)
+        for table, col, ddl in MIGRATIONS:
+            have = {r[0] for r in conn.execute("SELECT name FROM pragma_table_info(?)", (table,))}
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 @contextmanager
@@ -192,7 +223,7 @@ def _touch(conn, agent_id):
 
 # ---------- projects ----------
 
-def create_project(conn, name, description="", status="active", agent=None):
+def create_project(conn, name, description="", status="active", agent=None, repo="", branch=""):
     _check(status, PROJECT_STATUSES, "status")
     if not name or not str(name).strip():
         raise Invalid("name is required")
@@ -201,8 +232,8 @@ def create_project(conn, name, description="", status="active", agent=None):
         now = time.time()
         try:
             cur = conn.execute(
-                "INSERT INTO projects (name, description, status, created_at, updated_at) VALUES (?,?,?,?,?)",
-                (name.strip(), description, status, now, now),
+                "INSERT INTO projects (name, description, status, repo, branch, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                (name.strip(), description, status, repo or "", branch or "", now, now),
             )
         except sqlite3.IntegrityError:
             raise Invalid(f"project {name!r} already exists")
@@ -212,7 +243,7 @@ def create_project(conn, name, description="", status="active", agent=None):
 
 
 def update_project(conn, ref, agent=None, **fields):
-    allowed = {k: v for k, v in fields.items() if k in ("name", "description", "status") and v is not None}
+    allowed = {k: v for k, v in fields.items() if k in ("name", "description", "status", "repo", "branch") and v is not None}
     if "status" in allowed:
         _check(allowed["status"], PROJECT_STATUSES, "status")
     with write(conn):
@@ -250,6 +281,7 @@ def get_project(conn, ref):
 
 def _agent_view(r):
     a = dict(r)
+    a["metrics"] = json.loads(a.get("metrics") or "{}")
     if a["last_seen"] is None or time.time() - a["last_seen"] > OFFLINE_AFTER_SECONDS:
         a["effective_status"] = "offline"
     else:
@@ -260,11 +292,13 @@ def _agent_view(r):
 def list_agents(conn):
     rs = conn.execute("""
         SELECT a.*, t.title AS current_task_title, t.project_id AS current_project_id, p.name AS current_project_name,
+          par.name AS parent_name,
           (SELECT COUNT(*) FROM tasks x WHERE x.assignee_id=a.id AND x.status!='done') AS open_tasks,
           (SELECT COUNT(*) FROM tasks x WHERE x.assignee_id=a.id AND x.status='done') AS done_tasks
         FROM agents a
         LEFT JOIN tasks t ON t.id=a.current_task_id
         LEFT JOIN projects p ON p.id=t.project_id
+        LEFT JOIN agents par ON par.id=a.parent_id
         ORDER BY a.last_seen DESC
     """)
     return [_agent_view(r) for r in rs]
@@ -278,15 +312,27 @@ def get_agent(conn, ref):
     return a
 
 
-def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None):
-    """Register/refresh an agent. Call periodically so the dashboard knows it is alive."""
+def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None, model=None, host=None, parent=None, metrics=None):
+    """Register/refresh an agent. Call periodically so the dashboard knows it is alive.
+    metrics (e.g. vram_gb, tokens_per_sec, context_used, context_max, quant) is merged
+    into the agent's current metrics; a null value removes a key."""
     if status is not None:
         _check(status, AGENT_STATUSES, "status")
     with write(conn):
         aid = resolve_agent(conn, agent)
-        prev = conn.execute("SELECT status, status_note FROM agents WHERE id=?", (aid,)).fetchone()
+        prev = conn.execute("SELECT status, status_note, metrics FROM agents WHERE id=?", (aid,)).fetchone()
         sets, vals = ["last_seen=?"], [time.time()]
-        for col, val in (("status", status), ("status_note", note), ("role", role)):
+        if metrics:
+            merged = {**json.loads(prev["metrics"] or "{}"), **metrics}
+            sets.append("metrics=?")
+            vals.append(json.dumps({k: v for k, v in merged.items() if v is not None}))
+        if parent is not None:
+            pid = resolve_agent(conn, parent) if parent != "" else None
+            if pid == aid:
+                raise Invalid("an agent cannot be its own parent")
+            sets.append("parent_id=?")
+            vals.append(pid)
+        for col, val in (("status", status), ("status_note", note), ("role", role), ("model", model), ("host", host)):
             if val is not None:
                 sets.append(f"{col}=?")
                 vals.append(val)
@@ -297,6 +343,34 @@ def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None):
         if (status is not None and status != prev["status"]) or (note and note != prev["status_note"]):
             _log(conn, "agent.status", f"{status or prev['status']}" + (f": {note}" if note else ""), aid)
     return get_agent(conn, aid)
+
+
+# ---------- hosts ----------
+
+def _host_view(r):
+    h = dict(r)
+    h.update(json.loads(h.pop("data") or "{}"))
+    h["online"] = time.time() - h["last_seen"] <= OFFLINE_AFTER_SECONDS
+    return h
+
+
+def report_host(conn, name, **stats):
+    """Upsert a machine's hardware stats (see HOST_FIELDS). Unknown keys are ignored."""
+    if not name:
+        raise Invalid("host name is required")
+    data = {k: v for k, v in stats.items() if k in HOST_FIELDS and v is not None}
+    with write(conn):
+        r = conn.execute("SELECT data FROM hosts WHERE name=?", (name,)).fetchone()
+        if r:
+            merged = {**json.loads(r["data"] or "{}"), **data}
+            conn.execute("UPDATE hosts SET data=?, last_seen=? WHERE name=?", (json.dumps(merged), time.time(), name))
+        else:
+            conn.execute("INSERT INTO hosts (name, data, last_seen) VALUES (?,?,?)", (name, json.dumps(data), time.time()))
+    return _host_view(conn.execute("SELECT * FROM hosts WHERE name=?", (name,)).fetchone())
+
+
+def list_hosts(conn):
+    return [_host_view(r) for r in conn.execute("SELECT * FROM hosts ORDER BY last_seen DESC")]
 
 
 # ---------- tasks ----------
@@ -523,7 +597,19 @@ def stats(conn):
     activity = _rows(conn.execute("""
         SELECT CAST((ts - ?) / 3600 AS INTEGER) AS bucket, COUNT(*) AS n FROM events WHERE ts>=? GROUP BY bucket ORDER BY bucket
     """, (day_start, day_start)))
+    hosts = [h for h in list_hosts(conn) if h["online"]]
+    total = lambda k: round(sum(float(h.get(k) or 0) for h in hosts), 1)
     return {
+        "hosts_online": len(hosts),
+        "vram_used_gb": total("vram_used_gb"), "vram_total_gb": total("vram_total_gb"),
+        "ram_used_gb": total("ram_used_gb"), "ram_total_gb": total("ram_total_gb"),
+        "cpu_pct": round(sum(float(h.get("cpu_pct") or 0) for h in hosts) / len(hosts)) if hosts else None,
+        "tokens_per_sec": total("tokens_per_sec"),
+        "repos_connected": c("SELECT COUNT(*) FROM projects WHERE repo!=''"),
+        "agents_offline": sum(1 for a in agents if a["effective_status"] == "offline"),
+        "tasks_todo": c("SELECT COUNT(*) FROM tasks WHERE status='todo'"),
+        "tasks_review": c("SELECT COUNT(*) FROM tasks WHERE status='review'"),
+        "tasks_unassigned": c("SELECT COUNT(*) FROM tasks WHERE status='todo' AND assignee_id IS NULL"),
         "agents_total": len(agents),
         "agents_working": sum(1 for a in agents if a["effective_status"] == "working"),
         "agents_blocked": sum(1 for a in agents if a["effective_status"] == "blocked"),

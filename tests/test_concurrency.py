@@ -77,6 +77,38 @@ class BehaviourTest(unittest.TestCase):
         kinds = [e["kind"] for e in t2["events"]]
         self.assertIn("task.completed", kinds)
 
+    def test_hardware_metrics_and_hierarchy(self):
+        db.heartbeat(self.c, "lead", model="claude-sonnet", host="ws1", metrics={"tokens_per_sec": 80, "vram_gb": 2})
+        db.heartbeat(self.c, "sub", parent="lead", metrics={"vram_gb": 4})
+        db.heartbeat(self.c, "lead", metrics={"vram_gb": None, "quant": "API"})  # merge; None removes a key
+        lead = db.get_agent(self.c, "lead")
+        self.assertEqual(lead["metrics"], {"tokens_per_sec": 80, "quant": "API"})
+        self.assertEqual(db.get_agent(self.c, "sub")["parent_name"], "lead")
+        with self.assertRaises(db.Invalid):
+            db.heartbeat(self.c, "lead", parent="lead")
+        db.report_host(self.c, "ws1", gpu="RTX 4090", vram_used_gb=20, vram_total_gb=24, bogus=1)
+        db.report_host(self.c, "ws1", vram_used_gb=21)
+        h = db.list_hosts(self.c)[0]
+        self.assertEqual((h["gpu"], h["vram_used_gb"], "bogus" in h), ("RTX 4090", 21, False))
+        s = db.stats(self.c)
+        self.assertEqual((s["vram_used_gb"], s["vram_total_gb"], s["hosts_online"]), (21, 24, 1))
+        p = db.create_project(self.c, "r", repo="github.com/x/r", branch="main")
+        self.assertEqual((p["repo"], db.stats(self.c)["repos_connected"]), ("github.com/x/r", 1))
+
+    def test_migrates_old_schema(self):
+        path = os.path.join(self.d.name, "old.db")
+        old = db.sqlite3.connect(path)
+        old.execute("CREATE TABLE agents (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT '', "
+                    "status TEXT NOT NULL DEFAULT 'idle', status_note TEXT NOT NULL DEFAULT '', current_task_id INTEGER, "
+                    "last_seen REAL, created_at REAL NOT NULL)")
+        old.execute("INSERT INTO agents (name, created_at) VALUES ('legacy', 0)")
+        old.commit()
+        old.close()
+        c = db.connect(path)
+        db.init(c)
+        self.assertEqual(db.heartbeat(c, "legacy", model="m")["model"], "m")
+        c.close()
+
     def test_validation(self):
         with self.assertRaises(db.Invalid):
             db.create_task(self.c, "p", "x", priority="whenever")

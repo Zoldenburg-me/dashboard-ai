@@ -123,7 +123,7 @@ class Connection:
 
     def execute(self, sql, params=()):
         head = sql.lstrip()[:16].upper()
-        if head.startswith("PRAGMA"):
+        if head.startswith("PRAGMA") and any(k in sql.lower() for k in ("journal_mode", "synchronous", "busy_timeout")):
             return Cursor({})  # local-file tuning pragmas don't apply to a remote server
         if head.startswith("BEGIN"):
             return self._begin(sql)
