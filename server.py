@@ -205,6 +205,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/healthz":
             return self._send(200, {"ok": True})
+        if url.path == "/install.sh":
+            return self._install_script()
         if not self._authorized():
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="Agent dashboard"')
@@ -236,6 +238,14 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001
                     return self._send(500, {"error": f"{type(e).__name__}: {e}"})
         self._send(404, {"error": "not found"})
+
+    def _install_script(self):
+        """Public: holds no secrets; it asks for the password on the user's machine."""
+        proto = self.headers.get("X-Forwarded-Proto", "http")
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "localhost")
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "install.sh")) as f:
+            body = f.read().replace("__DASH_URL__", f"{proto}://{host}")
+        self._send(200, body.encode(), "text/x-shellscript; charset=utf-8")
 
     def _static(self, path):
         path = "/index.html" if path in ("", "/") else path

@@ -48,8 +48,14 @@ python3 agentctl.py task list --mine --status todo,in_progress
 Point at a different file with `--db PATH` or `AGENT_DB=PATH`. For a hosted dashboard, set `AGENT_DASH_URL=https://your-host` and `AGENT_DASH_TOKEN=...`.
 
 ### 2. MCP server: Claude Code and other MCP clients
+On each machine that runs Claude Code agents, run this once (and again any time to update):
 ```bash
-# hosted dashboard, registered once for every folder:
+curl -fsSL https://YOUR-DASHBOARD/install.sh | sh
+```
+It asks for the dashboard password (hidden), checks it against the dashboard, installs the code in `~/.agent-tracker/app`, removes any older `agent-tracker` entries (including per-folder ones, which would otherwise override it; `~/.claude.json` is backed up first) and adds the tracker for every folder. `/install.sh` is public and holds no secrets.
+
+Manual setup instead:
+```bash
 claude mcp add agent-tracker --scope user -e AGENT_DASH_URL=https://your-host -e AGENT_DASH_TOKEN=... \
   -- python3 /abs/path/dashboard-ai/mcp_server.py
 ```
