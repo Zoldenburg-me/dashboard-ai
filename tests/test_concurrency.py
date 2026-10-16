@@ -5,11 +5,14 @@
 import multiprocessing as mp
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import db  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 AGENTS = 12
 TASKS_PER_AGENT = 25
@@ -124,6 +127,13 @@ class BehaviourTest(unittest.TestCase):
         self.assertEqual((a["name"], len(a["tasks"])), ("new-name", 1))
         with self.assertRaises(db.NotFound):
             db.get_agent(self.c, "old-name")
+
+
+class RemoteModeTest(unittest.TestCase):
+    def test_mcp_server_starts_against_hosted_dashboard(self):
+        out = subprocess.run([sys.executable, "-c", "import mcp_server"], cwd=ROOT, capture_output=True, text=True,
+                             env={**os.environ, "AGENT_DASH_URL": "http://127.0.0.1:9"})
+        self.assertEqual(out.returncode, 0, out.stderr)
 
 
 if __name__ == "__main__":

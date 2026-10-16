@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
 
-from db import AGENT_STATUSES, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, Invalid, NotFound  # noqa: F401
+from db import AGENT_STATUSES, HOST_FIELDS, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, Invalid, NotFound  # noqa: F401
 
 URL = os.environ.get("AGENT_DASH_URL", "").rstrip("/")
 TOKEN = os.environ.get("AGENT_DASH_TOKEN", "")
