@@ -312,6 +312,22 @@ def get_agent(conn, ref):
     return a
 
 
+def rename_agent(conn, ref, name):
+    """Give an agent a new name; its tasks and history stay attached."""
+    name = (name or "").strip()
+    if not name or name.isdigit():
+        raise Invalid("name must be non-empty and not a number")
+    with write(conn):
+        aid = resolve_agent(conn, ref, create=False)
+        old = conn.execute("SELECT name FROM agents WHERE id=?", (aid,)).fetchone()["name"]
+        if old != name:
+            if conn.execute("SELECT 1 FROM agents WHERE name=?", (name,)).fetchone():
+                raise Invalid(f"agent name {name!r} is taken; choose another")
+            conn.execute("UPDATE agents SET name=?, last_seen=? WHERE id=?", (name, time.time(), aid))
+            _log(conn, "agent.renamed", f"{old} is now {name}", aid)
+    return get_agent(conn, aid)
+
+
 def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None, model=None, host=None, parent=None, metrics=None):
     """Register/refresh an agent. Call periodically so the dashboard knows it is alive.
     metrics (e.g. vram_gb, tokens_per_sec, context_used, context_max, quant) is merged

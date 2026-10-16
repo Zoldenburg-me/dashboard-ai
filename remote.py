@@ -72,6 +72,10 @@ def get_agent(conn, ref):
     return _call("GET", f"/api/agents/{_q(ref)}")
 
 
+def rename_agent(conn, ref, name):
+    return _call("PATCH", f"/api/agents/{_q(ref)}", {"name": name})
+
+
 def heartbeat(conn, agent, status=None, note=None, role=None, task_id=None, model=None, host=None, parent=None, metrics=None):
     return _call("POST", f"/api/agents/{_q(agent)}/heartbeat", _clean({"status": status, "note": note, "role": role, "task_id": task_id,
                                                                        "model": model, "host": host, "parent": parent, "metrics": metrics}))

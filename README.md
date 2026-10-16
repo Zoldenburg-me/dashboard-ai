@@ -53,8 +53,8 @@ Point at a different file with `--db PATH` or `AGENT_DB=PATH`. For a hosted dash
 claude mcp add agent-tracker --scope user -e AGENT_DASH_URL=https://your-host -e AGENT_DASH_TOKEN=... \
   -- python3 /abs/path/dashboard-ai/mcp_server.py
 ```
-The agent name is the folder Claude Code runs in (`~/code/zold-app` → `zold-app`), so each project folder is its own agent. Set `-e AGENT_NAME=...` to choose a fixed name instead.
-Tools: `tracker_heartbeat` (status, model, host, parent, metrics), `tracker_report_host`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
+Each agent chooses its own name by calling `tracker_register` first; the server tells it to on startup. Names are unique: if one is taken, the agent gets an error and picks another. The name is remembered per folder in `~/.config/agent-tracker/names.json`, so the agent keeps it after a restart. Calling `tracker_register` again with a new name renames the agent and keeps its tasks and history. Set `-e AGENT_NAME=...` to fix the name instead.
+Tools: `tracker_register` (name, role, model, host), `tracker_heartbeat` (status, model, host, parent, metrics), `tracker_report_host`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
 
 ### 3. HTTP API: agents on other machines
 Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
@@ -65,6 +65,7 @@ Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
 | GET/POST | `/api/projects` | `{name, description, repo, branch}` |
 | GET/PATCH | `/api/projects/{id or name}` | `{status, description, name, repo, branch}` |
 | GET  | `/api/agents`, `/api/agents/{id or name}` | |
+| PATCH | `/api/agents/{id or name}` | `{name}`: rename; 400 if the name is taken |
 | POST | `/api/agents/{name}/heartbeat` | `{status, note, role, task_id, model, host, parent, metrics: {}}` |
 | GET  | `/api/hosts` | |
 | POST | `/api/hosts/{name}` | `{gpu, engine, vram_used_gb, vram_total_gb, ram_used_gb, ram_total_gb, cpu_pct, tokens_per_sec, temp_c, power_w}` |
@@ -85,7 +86,8 @@ curl -X POST localhost:8787/api/tasks/7/progress -H 'X-Agent: backend-bot' -d '{
 ### Suggested agent instructions (paste into CLAUDE.md / AGENTS.md)
 ```
 Track all your work in the agent tracker (agentctl.py or the tracker_* MCP tools):
-- At start: heartbeat with status=working, your model, host and lead agent (if any). Claim a task or create one for the work you were given.
+- At start: if you have no tracker name yet, choose a short unique one and register (tracker_register).
+- Then: heartbeat with status=working, your model, host and lead agent (if any). Claim a task or create one for the work you were given.
 - Include metrics you know (vram_gb, tokens_per_sec, context_used, context_max) in heartbeats.
 - Before creating a task, list existing tasks; never create a second task for the same work.
 - Record every new piece of work as a task (or a todo on your current task) as soon as you identify it.

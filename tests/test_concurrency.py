@@ -115,6 +115,16 @@ class BehaviourTest(unittest.TestCase):
         with self.assertRaises(db.NotFound):
             db.get_task(self.c, 999)
 
+    def test_rename_agent_keeps_tasks(self):
+        db.create_task(self.c, "p", "x", assignee="old-name")
+        db.heartbeat(self.c, "other")
+        with self.assertRaises(db.Invalid):
+            db.rename_agent(self.c, "old-name", "other")
+        a = db.rename_agent(self.c, "old-name", "new-name")
+        self.assertEqual((a["name"], len(a["tasks"])), ("new-name", 1))
+        with self.assertRaises(db.NotFound):
+            db.get_agent(self.c, "old-name")
+
 
 if __name__ == "__main__":
     unittest.main()

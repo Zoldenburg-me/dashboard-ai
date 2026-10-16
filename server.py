@@ -96,6 +96,11 @@ def _agent(req, q, body, ref):
     return db.get_agent(conn(), ref)
 
 
+@route("PATCH", r"/api/agents/(?P<ref>[^/]+)")
+def _rename_agent(req, q, body, ref):
+    return db.rename_agent(conn(), ref, body.get("name"))
+
+
 @route("POST", r"/api/agents/(?P<ref>[^/]+)/heartbeat")
 def _heartbeat(req, q, body, ref):
     return db.heartbeat(conn(), ref, body.get("status"), body.get("note"), body.get("role"), body.get("task_id"),
