@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300..500,0..1,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark"><span class="ms">hub</span></div>
+      <div>
+        <div class="brand-name">Agent Command</div>
+        <div class="brand-sub">Projects &amp; work tracker</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="#/" data-nav="overview"><span class="ms">space_dashboard</span>Overview</a>
+      <a href="#/projects" data-nav="projects"><span class="ms">folder_open</span>Projects</a>
+      <a href="#/agents" data-nav="agents"><span class="ms">smart_toy</span>Agents</a>
+      <a href="#/tasks" data-nav="tasks"><span class="ms">checklist</span>Tasks</a>
+      <a href="#/activity" data-nav="activity"><span class="ms">timeline</span>Activity</a>
+    </nav>
+    <div class="nav-section">Projects</div>
+    <div class="nav-projects" id="navProjects"></div>
+    <div class="sidebar-foot">
+      <span class="live-dot" id="liveDot"></span><span id="liveText">Connecting…</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu"><span class="ms">menu</span></button>
+      <div class="crumbs" id="crumbs"></div>
+      <div class="topbar-actions">
+        <div class="search"><span class="ms">search</span><input id="search" placeholder="Search tasks…" autocomplete="off"></div>
+        <button class="btn btn-ghost" id="newProjectBtn"><span class="ms">create_new_folder</span><span class="hide-sm">Project</span></button>
+        <button class="btn btn-primary" id="newTaskBtn"><span class="ms">add</span><span class="hide-sm">New task</span></button>
+      </div>
+    </header>
+    <div class="content" id="view"></div>
+  </main>
+</div>
+
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+
+<dialog id="modal"></dialog>
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
