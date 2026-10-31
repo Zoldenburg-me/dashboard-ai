@@ -15,6 +15,13 @@ For a hosted dashboard set AGENT_DASH_URL (and AGENT_DASH_TOKEN) to go over HTTP
   agentctl.py todo done 31
   agentctl.py task set 12 --status done --note "merged"
   agentctl.py task list --project web-app --status todo,in_progress
+  agentctl.py rules --master taskmaster       # what breaks the tracking rules right now
+
+Teams (outside groups with their own agents; needs the master token when hosted):
+  agentctl.py team add acme
+  agentctl.py team grant acme web-app         # acme's tokens see only granted projects
+  agentctl.py team token acme --label "acme laptop" [--agent acme-openclaw]
+  agentctl.py team revoke 3
 """
 import argparse
 import json
@@ -102,6 +109,20 @@ def main(argv=None):
 
     ev = sub.add_parser("events"); ev.add_argument("--project"); ev.add_argument("--since", type=int); ev.add_argument("--limit", type=int, default=20)
     sub.add_parser("stats")
+    p = sub.add_parser("rules", help="list breaks of the tracking rules")
+    p.add_argument("--master", default=os.environ.get("AGENT_DASH_MASTER", "taskmaster"),
+                   help="root agent your agents report to (default: $AGENT_DASH_MASTER or taskmaster)")
+    p.add_argument("--quiet-minutes", type=int, default=30, help="in-progress task with no progress for this long counts as quiet")
+
+    tm = sub.add_parser("team").add_subparsers(dest="sub", required=True)
+    p = tm.add_parser("add"); p.add_argument("name")
+    tm.add_parser("list")
+    p = tm.add_parser("show"); p.add_argument("name")
+    p = tm.add_parser("grant", help="give the team access to a project"); p.add_argument("name"); p.add_argument("project")
+    p = tm.add_parser("ungrant"); p.add_argument("name"); p.add_argument("project")
+    p = tm.add_parser("token", help="create a token (shown once)"); p.add_argument("name"); p.add_argument("--label", default="")
+    p.add_argument("--agent", help="bind the token to one agent name")
+    p = tm.add_parser("revoke", help="revoke a token by id"); p.add_argument("id", type=int)
 
     a = ap.parse_args(argv)
     if a.db:
@@ -161,7 +182,17 @@ def main(argv=None):
             out = db.list_events(c, since=a.since, project=a.project, limit=a.limit)
         elif a.cmd == "stats":
             out = db.stats(c)
-    except (db.NotFound, db.Invalid) as e:
+        elif a.cmd == "rules":
+            out = db.check_rules(c, master=a.master, quiet_minutes=a.quiet_minutes)
+        elif a.cmd == "team":
+            out = {"add": lambda: db.create_team(c, a.name),
+                   "list": lambda: db.list_teams(c),
+                   "show": lambda: db.get_team(c, a.name),
+                   "grant": lambda: db.grant_project(c, a.name, a.project),
+                   "ungrant": lambda: db.grant_project(c, a.name, a.project, grant=False),
+                   "token": lambda: db.create_token(c, a.name, a.label, a.agent),
+                   "revoke": lambda: db.revoke_token(c, a.id)}[sc]()
+    except (db.NotFound, db.Invalid, db.Forbidden) as e:
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2, default=str))
