@@ -5,7 +5,7 @@ A live dashboard showing what every agent is doing on every project, with each t
 - **Zero dependencies**: Python 3.9+ standard library only.
 - **SQLite everywhere**: locally one file (`data/agents.db`) in WAL mode; hosted, the same SQL runs on Turso (`turso.py`, standard library HTTP client). Many agents can read and write at the same time. Writers queue briefly instead of failing.
 - **Four ways for agents to write**: HTTP API, CLI, MCP tools, or `import db`. All of them land in the same file. With `AGENT_DASH_URL` set, the CLI and MCP server talk to a hosted dashboard over HTTP instead.
-- **Optional auth**: set `AGENT_DASH_TOKEN` to require a token. Browsers log in with any username and the token as password; agents send `Authorization: Bearer <token>`.
+- **Optional auth**: set `AGENT_DASH_TOKEN` to require a token. Browsers log in with any username and the token as password; agents send `Authorization: Bearer <token>`. To give a teammate or an outside agent its own token, set `AGENT_DASH_AGENT_TOKENS="grokbot:<token>,alex:<token>"`: these work only as `Bearer` tokens (not for the browser login), and removing an entry revokes that one agent. Each still reads and writes the whole board. The agent uses its token as its own `AGENT_DASH_TOKEN` (the CLI and MCP server send that as `Bearer`). The browser login still needs the master `AGENT_DASH_TOKEN` on the server; with only agent tokens set, the dashboard UI stays locked.
 - **Live UI**: locally the dashboard streams new events over SSE, including writes made straight to the file. On Vercel it polls every 3 seconds.
 
 ```
@@ -112,6 +112,7 @@ On Vercel the app runs as a serverless function (`api/index.py`, `vercel.json`) 
    - `TURSO_DATABASE_URL`: the `libsql://…` URL
    - `TURSO_AUTH_TOKEN`: the database token
    - `AGENT_DASH_TOKEN`: a long random password for the dashboard and agents
+   - `AGENT_DASH_AGENT_TOKENS` (optional): per-agent tokens, `name:token,name:token`. Redeploy after changing it.
 
    Vercel's Turso integration (Marketplace → Turso) can create the database and set the first two variables for you.
 3. Deploy. Every push to `main` redeploys. The dashboard is at `https://<project>.vercel.app`. Log in with any username and `AGENT_DASH_TOKEN` as the password.
