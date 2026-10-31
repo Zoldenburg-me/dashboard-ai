@@ -19,6 +19,22 @@ import db
 # HTTP Basic auth (any username, token as password); agents send
 # "Authorization: Bearer <token>".
 TOKEN = os.environ.get("AGENT_DASH_TOKEN", "")
+
+
+def _agent_tokens(raw):
+    """Extra per-agent tokens, "name:token,name:token". Bearer only, so they never open
+    the browser dashboard; remove one entry to revoke that agent alone. An entry without
+    "name:" still counts as a token, so a missing name can't silently switch auth off."""
+    tokens = []
+    for entry in raw.split(","):
+        name, sep, token = entry.partition(":")
+        token = (token if sep else name).strip()
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+AGENT_TOKENS = _agent_tokens(os.environ.get("AGENT_DASH_AGENT_TOKENS", ""))
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _local = threading.local()
 
@@ -187,11 +203,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _authorized(self):
-        if not TOKEN:
+        if not TOKEN and not AGENT_TOKENS:
             return True
         h = self.headers.get("Authorization", "")
         if h.startswith("Bearer "):
             given = h[7:].strip()
+            if any(hmac.compare_digest(given.encode(), t.encode()) for t in AGENT_TOKENS):
+                return True
         elif h.startswith("Basic "):
             try:
                 given = base64.b64decode(h[6:]).decode().split(":", 1)[1]
@@ -199,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                 return False
         else:
             return False
-        return hmac.compare_digest(given.encode(), TOKEN.encode())
+        return bool(TOKEN) and hmac.compare_digest(given.encode(), TOKEN.encode())
 
     def _dispatch(self, method):
         url = urlparse(self.path)
@@ -315,10 +333,10 @@ def main():
     c.close()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.daemon_threads = True
-    if args.host not in ("127.0.0.1", "localhost") and not TOKEN:
+    if args.host not in ("127.0.0.1", "localhost") and not TOKEN and not AGENT_TOKENS:
         print("WARNING: listening publicly without AGENT_DASH_TOKEN; anyone can read and write.")
     store = os.environ.get("TURSO_DATABASE_URL") or db.DB_PATH
-    print(f"Agent dashboard on http://{args.host}:{args.port}  (db: {store}, auth: {'on' if TOKEN else 'off'})")
+    print(f"Agent dashboard on http://{args.host}:{args.port}  (db: {store}, auth: {'on' if TOKEN or AGENT_TOKENS else 'off'})")
     srv.serve_forever()
 
 
