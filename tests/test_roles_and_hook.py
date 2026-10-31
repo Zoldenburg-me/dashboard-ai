@@ -47,6 +47,7 @@ class Roles(Base):
         self.assertNotIn("tracker_check_rules", main)
         master = self.tool_names("master")
         self.assertIn("tracker_check_rules", master)
+        self.assertIn("tracker_create_task", master)
         self.assertNotIn("tracker_claim_next_task", master)
 
     def test_master_checks_rules(self):

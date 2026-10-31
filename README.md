@@ -70,7 +70,7 @@ Set `AGENT_TRACKER_ROLE` in the environment Claude Code starts with; the MCP ser
 
 | Role | Who | Tracker tools |
 |---|---|---|
-| `master` | one session that enforces the rules, e.g. `AGENT_TRACKER_ROLE=master AGENT_NAME=taskmaster claude` | read the board, `tracker_check_rules`, `tracker_update_task`, `tracker_log_progress` |
+| `master` | one session that enforces the rules, e.g. `AGENT_TRACKER_ROLE=master AGENT_NAME=taskmaster claude` | read the board, `tracker_check_rules`, `tracker_create_task`, `tracker_update_task`, `tracker_log_progress` |
 | `main` (default) | one agent per folder; heartbeats with `parent=taskmaster` | all task tools |
 | `sub` | sub-sessions a Main starts: `AGENT_TRACKER_ROLE=sub claude …` | none. They load no tool definitions and can't write as their Main |
 
