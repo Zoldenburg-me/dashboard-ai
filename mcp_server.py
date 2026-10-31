@@ -153,7 +153,7 @@ def tools(api, me, role="main", remote=False):
     }
     if role == "master":
         keep = ("tracker_register", "tracker_heartbeat", "tracker_list_projects", "tracker_list_agents", "tracker_list_tasks",
-                "tracker_get_task", "tracker_update_task", "tracker_log_progress", "tracker_check_rules")
+                "tracker_get_task", "tracker_create_task", "tracker_update_task", "tracker_log_progress", "tracker_check_rules")
     else:
         keep = [n for n in every if n not in ("tracker_list_agents", "tracker_check_rules")]
     if remote:  # identity comes from the token or the X-Agent header, not from a folder
