@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
 
-from db import AGENT_STATUSES, HOST_FIELDS, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, Invalid, NotFound  # noqa: F401
+from db import AGENT_STATUSES, HOST_FIELDS, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, Forbidden, Invalid, NotFound  # noqa: F401
 
 URL = os.environ.get("AGENT_DASH_URL", "").rstrip("/")
 TOKEN = os.environ.get("AGENT_DASH_TOKEN", "")
@@ -28,7 +28,7 @@ def _call(method, path, body=None, query=None, agent=None):
             return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         msg = json.loads(e.read() or b"{}").get("error", e.reason) if e.code != 401 else "unauthorized: set AGENT_DASH_TOKEN"
-        raise (NotFound if e.code == 404 else Invalid)(msg)
+        raise {404: NotFound, 403: Forbidden}.get(e.code, Invalid)(msg)
 
 
 def _q(ref):
@@ -66,6 +66,10 @@ def create_project(conn, name, description="", status="active", agent=None, repo
 
 def update_project(conn, ref, agent=None, **fields):
     return _call("PATCH", f"/api/projects/{_q(ref)}", _clean(fields), agent=agent)
+
+
+def list_agents(conn):
+    return _call("GET", "/api/agents")
 
 
 def get_agent(conn, ref):
@@ -124,3 +128,35 @@ def set_todo(conn, todo_id, done=None, text=None, agent=None):
 
 def list_events(conn, since=None, project=None, agent=None, task=None, limit=100):
     return _call("GET", "/api/events", query={"since": since, "project": project, "agent": agent, "task": task, "limit": limit})
+
+
+def check_rules(conn, team_id=None, master=None, quiet_minutes=30):
+    return _call("GET", "/api/rules", query={"master": master, "quiet_minutes": quiet_minutes})
+
+
+def whoami(conn):
+    return _call("GET", "/api/whoami")
+
+
+def list_teams(conn):
+    return _call("GET", "/api/teams")
+
+
+def get_team(conn, ref):
+    return _call("GET", f"/api/teams/{_q(ref)}")
+
+
+def create_team(conn, name):
+    return _call("POST", "/api/teams", {"name": name})
+
+
+def create_token(conn, team, label="", agent=None):
+    return _call("POST", f"/api/teams/{_q(team)}/tokens", _clean({"label": label, "agent": agent}))
+
+
+def revoke_token(conn, token_id):
+    return _call("DELETE", f"/api/tokens/{int(token_id)}")
+
+
+def grant_project(conn, team, project, grant=True):
+    return _call("POST" if grant else "DELETE", f"/api/teams/{_q(team)}/projects/{_q(project)}")

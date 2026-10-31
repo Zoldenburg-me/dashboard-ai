@@ -6,12 +6,14 @@ A live dashboard showing what every agent is doing on every project, with each t
 - **SQLite everywhere**: locally one file (`data/agents.db`) in WAL mode; hosted, the same SQL runs on Turso (`turso.py`, standard library HTTP client). Many agents can read and write at the same time. Writers queue briefly instead of failing.
 - **Four ways for agents to write**: HTTP API, CLI, MCP tools, or `import db`. All of them land in the same file. With `AGENT_DASH_URL` set, the CLI and MCP server talk to a hosted dashboard over HTTP instead.
 - **Optional auth**: set `AGENT_DASH_TOKEN` to require a token. Browsers log in with any username and the token as password; agents send `Authorization: Bearer <token>`. To give a teammate or an outside agent its own token, set `AGENT_DASH_AGENT_TOKENS="grokbot:<token>,alex:<token>"`: these work only as `Bearer` tokens (not for the browser login), and removing an entry revokes that one agent. Each still reads and writes the whole board. The agent uses its token as its own `AGENT_DASH_TOKEN` (the CLI and MCP server send that as `Bearer`). The browser login still needs the master `AGENT_DASH_TOKEN` on the server; with only agent tokens set, the dashboard UI stays locked.
+- **Teams for outside agents**: a team token (stored hashed in the database, no redeploy) sees and changes only the projects granted to its team, and acts only as that team's own agents, so it can't write as yours. See [Teams](#teams-outside-agents).
+- **Roles**: one master agent (e.g. `taskmaster`) watches the board and enforces the rules, one Main agent per folder does the work and reports it, and sub-sessions report nothing. See [Roles](#roles-master-main-sub).
 - **Live UI**: locally the dashboard streams new events over SSE, including writes made straight to the file. On Vercel it polls every 3 seconds.
 
 ```
 python3 server.py                 # http://127.0.0.1:8787  (--host 0.0.0.0 + AGENT_DASH_TOKEN to expose)
 python3 demo_agents.py            # optional: seed sample data + 5 simulated agents
-python3 -m unittest discover -s tests -v   # Turso tests also run if TURSO_DATABASE_URL is set (see tests/test_turso.py)
+python3 -m unittest discover -s tests -v   # run from the repo folder; Turso tests also run if TURSO_DATABASE_URL is set
 ```
 
 ## Data model
@@ -24,6 +26,7 @@ python3 -m unittest discover -s tests -v   # Turso tests also run if TURSO_DATAB
 | `tasks`    | project, title, description, status (`todo/in_progress/blocked/review/done`), priority (`low/medium/high/urgent`), assignee, timestamps |
 | `todos`    | checklist items on a task |
 | `events`   | append-only log of every change: the activity feed and audit trail |
+| `teams`, `team_projects`, `tokens` | outside teams, the projects each may access, and their tokens (hashed; optionally bound to one agent) |
 
 Projects, agents, hosts, tasks and todos hold only the current state and are overwritten in place. History lives only in `events`.
 
@@ -52,7 +55,7 @@ On each machine that runs Claude Code agents, run this once (and again any time 
 ```bash
 curl -fsSL https://YOUR-DASHBOARD/install.sh | sh
 ```
-It asks for the dashboard password (hidden), checks it against the dashboard, installs the code in `~/.agent-tracker/app`, removes any older `agent-tracker` entries (including per-folder ones, which would otherwise override it; `~/.claude.json` is backed up first) and adds the tracker for every folder. `/install.sh` is public and holds no secrets.
+It asks for the dashboard password (hidden), checks it against the dashboard, installs the code in `~/.agent-tracker/app`, removes any older `agent-tracker` entries (including per-folder ones, which would otherwise override it; `~/.claude.json` is backed up first) adds the tracker for every folder, and adds the [token-usage hooks](#claude-code-hooks-token-usage-at-no-model-cost) (`~/.claude/settings.json` is backed up first). `/install.sh` is public and holds no secrets.
 
 Manual setup instead:
 ```bash
@@ -61,6 +64,42 @@ claude mcp add agent-tracker --scope user -e AGENT_DASH_URL=https://your-host -e
 ```
 Each agent chooses its own name by calling `tracker_register` first; the server tells it to on startup. Names are unique: if one is taken, the agent gets an error and picks another. The name is remembered per folder in `~/.config/agent-tracker/names.json`, so the agent keeps it after a restart. Calling `tracker_register` again with a new name renames the agent and keeps its tasks and history. Set `-e AGENT_NAME=...` to fix the name instead.
 Tools: `tracker_register` (name, role, model, host), `tracker_heartbeat` (status, model, host, parent, metrics), `tracker_report_host`, `tracker_list_projects`, `tracker_create_project`, `tracker_list_tasks`, `tracker_get_task`, `tracker_create_task`, `tracker_update_task`, `tracker_claim_next_task`, `tracker_log_progress`, `tracker_add_todo`, `tracker_complete_todo`.
+
+### Roles: master, Main, sub
+Set `AGENT_TRACKER_ROLE` in the environment Claude Code starts with; the MCP server and the hooks both read it.
+
+| Role | Who | Tracker tools |
+|---|---|---|
+| `master` | one session that enforces the rules, e.g. `AGENT_TRACKER_ROLE=master AGENT_NAME=taskmaster claude` | read the board, `tracker_check_rules`, `tracker_update_task`, `tracker_log_progress` |
+| `main` (default) | one agent per folder; heartbeats with `parent=taskmaster` | all task tools |
+| `sub` | sub-sessions a Main starts: `AGENT_TRACKER_ROLE=sub claude …` | none. They load no tool definitions and can't write as their Main |
+
+Claude Code's built-in subagents share their Main's session, so they need nothing. A git worktree is a different folder, so a session there gets its own name.
+
+`tracker_check_rules` (also `GET /api/rules` and `agentctl.py rules`) lists what breaks the tracking rules, most severe first:
+- agents that say working or blocked but have gone silent
+- agents working without a claimed task
+- your agents that report to nobody (when the master agent exists)
+- in-progress tasks with no assignee, or with no progress for `quiet_minutes` (default 30)
+- agents with several tasks in progress
+- open tasks with the same title in one project
+
+The server reads the master's name from `AGENT_DASH_MASTER` (default `taskmaster`).
+
+### Claude Code hooks: token usage at no model cost
+`install.sh` adds `hooks/claude_hook.py` to `~/.claude/settings.json` for two events. It runs outside the model, so it costs no tokens:
+- **Stop**: adds up the session's token usage from its transcript and reports, as the Main agent's metrics, the folder's total over the last 24 hours. That covers the Main and all its sub-sessions (`tokens_in_24h`, `tokens_out_24h`, `cache_read_24h`, `cache_write_24h`, `sessions_24h`), plus `context_used` and the model. Sub-sessions only store their usage locally; the Main's next Stop reports it.
+- **SessionEnd**: marks the Main agent idle.
+
+The hook finds the dashboard in `~/.config/agent-tracker/env`, which `install.sh` writes, and never fails a session. Set `AGENT_TRACKER_DEBUG=1` to see its errors.
+
+### Remote MCP: no install
+`POST /mcp` speaks MCP over streamable HTTP. Any MCP client that supports remote servers connects with the URL and a Bearer token, for example:
+```bash
+claude mcp add --transport http agent-tracker https://your-host/mcp \
+  --header "Authorization: Bearer <token>" --header "X-Agent: acme-openclaw"
+```
+The agent is the token's bound agent, or the `X-Agent` header. `X-Agent-Role: master` gives the master tool set.
 
 ### 3. HTTP API: agents on other machines
 Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
@@ -84,10 +123,36 @@ Identify the caller with an `"agent"` field in the body or an `X-Agent` header.
 | PATCH | `/api/todos/{id}` | `{done, text}` |
 | GET  | `/api/events` | `?since=&project=&agent=&task=&limit=` |
 | GET  | `/api/stream` | Server-sent events |
+| GET  | `/api/whoami` | who the token is: `admin`, `internal` or `team` (with team and bound agent) |
+| GET  | `/api/rules` | `?master=&quiet_minutes=`: rule breaks, see [Roles](#roles-master-main-sub) |
+| POST | `/mcp` | remote MCP endpoint |
+| GET/POST | `/api/teams` | admin only. `{name}` |
+| GET  | `/api/teams/{name}` | admin only: projects, agents, tokens (never the token itself) |
+| POST | `/api/teams/{name}/tokens` | admin only. `{label, agent}`; the response holds the token, shown once |
+| DELETE | `/api/tokens/{id}` | admin only: revoke |
+| POST/DELETE | `/api/teams/{name}/projects/{project}` | admin only: grant or take away a project |
 
 ```bash
 curl -X POST localhost:8787/api/tasks/7/progress -H 'X-Agent: backend-bot' -d '{"message":"tests green"}'
 ```
+
+### Teams: outside agents
+For agents you don't run yourself (another team's OpenClaw, a contractor's bot). Manage teams with the master token, from the CLI (locally, or against the hosted dashboard with `AGENT_DASH_URL` and the master `AGENT_DASH_TOKEN`) or the API:
+```bash
+python3 agentctl.py team add acme
+python3 agentctl.py team grant acme web-app                       # acme sees only granted projects
+python3 agentctl.py team token acme --label "acme ci"             # prints the token once
+python3 agentctl.py team token acme --agent acme-openclaw         # this token can only act as acme-openclaw
+python3 agentctl.py team show acme                                # projects, agents, tokens
+python3 agentctl.py team revoke 3                                 # revoke token 3 at once
+```
+A team token:
+- sees only its granted projects, their tasks and events, and its own agents; other projects return 404
+- writes only as its own agents. A name it uses first joins the team; names that belong to your agents or another team get 403. Every write must name an agent (`agent` field or `X-Agent` header), unless the token is bound to one.
+- creates projects that are granted to its team automatically
+- can't open the dashboard, the live stream, board-wide stats, host stats or team management
+
+Team tokens need `AGENT_DASH_TOKEN` set on the server; with auth off, everything is open.
 
 ### Suggested agent instructions (paste into CLAUDE.md / AGENTS.md)
 ```
@@ -102,6 +167,7 @@ Track all your work in the agent tracker (agentctl.py or the tracker_* MCP tools
 - History belongs in the progress log only: one line per meaningful step (task log / tracker_log_progress).
 - Tick off todos as you finish them. Mark the task blocked (with a reason) or done (with a summary).
 - When you stop: heartbeat with status=idle.
+- Report to the master: heartbeat with parent=taskmaster.
 ```
 
 ## Hosting on Vercel + Turso (free, no card)
