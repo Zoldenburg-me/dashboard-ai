@@ -89,6 +89,20 @@ class TeamTokens(TeamCase):
         self.assertIn("acme-new", [x["name"] for x in self.as_team("GET", "/api/projects")[1]])
         self.assertEqual({a["team_name"] for a in self.as_team("GET", "/api/agents")[1]}, {"acme"})
 
+    def test_project_name_clash_is_a_plain_400(self):
+        code, r = self.as_team("POST", "/api/projects", {"name": "internal-proj"})
+        self.assertEqual((code, r["error"]), (400, "project name 'internal-proj' is taken; choose another"))
+        code, r = self.as_team("PATCH", "/api/projects/acme-proj", {"name": "internal-proj"})
+        self.assertEqual((code, r["error"]), (400, "project name 'internal-proj' is taken; choose another"))
+        self.assertEqual(self.as_team("GET", "/api/projects/acme-proj")[0], 200)
+
+    def test_project_name_must_be_a_real_string(self):
+        for bad in ([1], {"x": 1}, 5, "  "):
+            self.assertEqual(self.as_team("POST", "/api/projects", {"name": bad})[0], 400, bad)
+            self.assertEqual(self.as_team("PATCH", "/api/projects/acme-proj", {"name": bad})[0], 400, bad)
+        code, r = self.as_team("PATCH", "/api/projects/acme-proj", {"name": " internal-proj "})
+        self.assertEqual(code, 400)  # stripped before the clash check, so no look-alike names
+
     def test_internal_token_cannot_take_a_team_name(self):
         self.as_team("POST", "/api/agents/acme-3/heartbeat", {}, agent=None)
         self.assertEqual(self.call("GET", "/api/agents/acme-3")[1]["team_name"], "acme")

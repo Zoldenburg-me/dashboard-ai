@@ -253,7 +253,7 @@ def _touch(conn, agent_id):
 def create_project(conn, name, description="", status="active", agent=None, repo="", branch="", team_id=None):
     """team_id grants the new project to that team (a team creating its own project)."""
     _check(status, PROJECT_STATUSES, "status")
-    if not name or not str(name).strip():
+    if not isinstance(name, str) or not name.strip():
         raise Invalid("name is required")
     with write(conn):
         aid = resolve_agent(conn, agent)
@@ -264,7 +264,8 @@ def create_project(conn, name, description="", status="active", agent=None, repo
                 (name.strip(), description, status, repo or "", branch or "", now, now),
             )
         except sqlite3.IntegrityError:
-            raise Invalid(f"project {name!r} already exists")
+            # same wording as a rename clash, and nothing about whose project it is: team tokens see this too
+            raise Invalid(f"project name {name.strip()!r} is taken; choose another")
         if team_id:
             conn.execute("INSERT INTO team_projects (team_id, project_id) VALUES (?,?)", (team_id, cur.lastrowid))
         _log(conn, "project.created", f"Project {name} created", aid, cur.lastrowid)
@@ -276,12 +277,19 @@ def update_project(conn, ref, agent=None, **fields):
     allowed = {k: v for k, v in fields.items() if k in ("name", "description", "status", "repo", "branch") and v is not None}
     if "status" in allowed:
         _check(allowed["status"], PROJECT_STATUSES, "status")
+    if "name" in allowed:
+        if not isinstance(allowed["name"], str) or not allowed["name"].strip():
+            raise Invalid("name must be a non-empty string")
+        allowed["name"] = allowed["name"].strip()
     with write(conn):
         pid = resolve_project(conn, ref)
         aid = resolve_agent(conn, agent)
         if allowed:
             sets = ", ".join(f"{k}=?" for k in allowed)
-            conn.execute(f"UPDATE projects SET {sets}, updated_at=? WHERE id=?", (*allowed.values(), time.time(), pid))
+            try:
+                conn.execute(f"UPDATE projects SET {sets}, updated_at=? WHERE id=?", (*allowed.values(), time.time(), pid))
+            except sqlite3.IntegrityError:
+                raise Invalid(f"project name {allowed.get('name')!r} is taken; choose another")
             _log(conn, "project.updated", "Project updated: " + ", ".join(f"{k}={v}" for k, v in allowed.items()), aid, pid)
         _touch(conn, aid)
     return get_project(conn, pid)
