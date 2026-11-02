@@ -5,7 +5,7 @@ A live dashboard showing what every agent is doing on every project, with each t
 - **Zero dependencies**: Python 3.9+ standard library only.
 - **SQLite everywhere**: locally one file (`data/agents.db`) in WAL mode; hosted, the same SQL runs on Turso (`turso.py`, standard library HTTP client). Many agents can read and write at the same time. Writers queue briefly instead of failing.
 - **Four ways for agents to write**: HTTP API, CLI, MCP tools, or `import db`. All of them land in the same file. With `AGENT_DASH_URL` set, the CLI and MCP server talk to a hosted dashboard over HTTP instead.
-- **Optional auth**: set `AGENT_DASH_TOKEN` to require a token. Browsers log in with any username and the token as password; agents send `Authorization: Bearer <token>`. To give a teammate or an outside agent its own token, set `AGENT_DASH_AGENT_TOKENS="grokbot:<token>,alex:<token>"`: these work only as `Bearer` tokens (not for the browser login), and removing an entry revokes that one agent. Each still reads and writes the whole board. The agent uses its token as its own `AGENT_DASH_TOKEN` (the CLI and MCP server send that as `Bearer`). The browser login still needs the master `AGENT_DASH_TOKEN` on the server; with only agent tokens set, the dashboard UI stays locked.
+- **Optional auth**: set `AGENT_DASH_TOKEN` to require a token. Browsers log in with any username and the token as password; agents send `Authorization: Bearer <token>`. To give a teammate or an outside agent its own token, set `AGENT_DASH_AGENT_TOKENS="grokbot:<token>,alex:<token>"`: these work only as `Bearer` tokens (not for the browser login), and removing an entry revokes that one agent. Each still reads and writes the whole board. The agent uses its token as its own `AGENT_DASH_TOKEN` (the CLI and MCP server send that as `Bearer`). The browser login still needs the master `AGENT_DASH_TOKEN` on the server; with only agent tokens set, the dashboard UI stays locked. Team tokens (below) can also log into the browser, read-only.
 - **Teams for outside agents**: a team token (stored hashed in the database, no redeploy) sees and changes only the projects granted to its team, and acts only as that team's own agents, so it can't write as yours. See [Teams](#teams-outside-agents).
 - **Roles**: one master agent (e.g. `taskmaster`) watches the board and enforces the rules, one Main agent per folder does the work and reports it, and sub-sessions report nothing. See [Roles](#roles-master-main-sub).
 - **Live UI**: locally the dashboard streams new events over SSE, including writes made straight to the file. On Vercel it polls every 3 seconds.
@@ -150,7 +150,8 @@ A team token:
 - sees only its granted projects, their tasks and events, and its own agents; other projects return 404
 - writes only as its own agents. A name it uses first joins the team; names that belong to your agents or another team get 403. Every write must name an agent (`agent` field or `X-Agent` header), unless the token is bound to one.
 - creates projects that are granted to its team automatically
-- can't open the dashboard, the live stream, board-wide stats, host stats or team management
+- can log into the dashboard in a browser (any username, the token as password), read-only: it sees its granted projects, their tasks and events, and its own agents; every write, `/mcp` and the live stream answer 403 there (the page polls instead)
+- can't read the live stream, board-wide stats, host stats or team management
 
 Team tokens need `AGENT_DASH_TOKEN` set on the server; with auth off, everything is open.
 

@@ -118,8 +118,27 @@ class TeamTokens(TeamCase):
     def test_team_is_kept_out_of_admin_ui_and_board_wide_reads(self):
         for path in ("/api/stats", "/api/hosts", "/api/teams", "/api/stream", "/"):
             self.assertEqual(self.as_team("GET", path)[0], 403, path)
-        self.assertEqual(self.call("GET", "/api/whoami", auth=basic(self.tok[7:]))[0], 401)
         self.assertEqual(self.call("POST", "/api/teams", {"name": "x"}, auth="Bearer gb-1")[0], 403)
+
+    def test_browser_login_is_read_only_and_scoped(self):
+        web = basic(self.bound[7:])
+        me = self.call("GET", "/api/whoami", auth=web)[1]
+        self.assertEqual((me["kind"], me["team"], me["agent"]), ("team", "acme", "acme-claw"))
+        page = urllib.request.Request(f"http://127.0.0.1:{self.port}/", headers={"Authorization": web})
+        with urllib.request.urlopen(page, timeout=5) as r:
+            self.assertEqual(r.status, 200)
+        self.assertEqual(self.call("GET", "/api/config", auth=web)[1]["stream"], False)
+        self.assertEqual([p["name"] for p in self.call("GET", "/api/projects", auth=web)[1]], ["acme-proj"])
+        self.assertNotIn("secret work", json.dumps(self.call("GET", "/api/tasks", auth=web)[1]))
+        for path in ("/api/stats", "/api/hosts", "/api/teams", "/api/stream"):
+            self.assertEqual(self.call("GET", path, auth=web)[0], 403, path)
+        for method, path, body in (("POST", "/api/tasks", {"project": "acme-proj", "title": "web write"}),
+                                   ("POST", "/api/agents/acme-claw/heartbeat", {"status": "idle"}),
+                                   ("PATCH", "/api/projects/acme-proj", {"name": "renamed"}),
+                                   ("POST", "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})):
+            self.assertEqual(self.call(method, path, body, auth=web)[0], 403, path)
+        self.assertNotIn("web write", json.dumps(self.call("GET", "/api/tasks")[1]))
+        self.assertEqual(self.call("GET", "/api/whoami", auth=basic("tk_not-a-real-token"))[0], 401)
 
     def test_revoked_token_stops_working(self):
         made = self.call("POST", "/api/teams/acme/tokens", {"label": "temp"})[1]
@@ -127,6 +146,7 @@ class TeamTokens(TeamCase):
         self.assertEqual(self.call("GET", "/api/whoami", auth=auth)[0], 200)
         self.assertEqual(self.call("DELETE", f"/api/tokens/{made['id']}")[0], 200)
         self.assertEqual(self.call("GET", "/api/whoami", auth=auth)[0], 401)
+        self.assertEqual(self.call("GET", "/api/whoami", auth=basic(made["token"]))[0], 401)
         team = self.call("GET", "/api/teams/acme")[1]
         self.assertNotIn("token_hash", json.dumps(team))
 

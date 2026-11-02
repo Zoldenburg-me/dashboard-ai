@@ -71,7 +71,8 @@ function toast(msg, err = false) {
 const S = { stats: {}, projects: [], agents: [], hosts: [], config: { stream: true }, route: "", filter: { project: "", assignee: "", priority: "" }, freshIds: new Set() };
 
 async function loadShared() {
-  [S.stats, S.projects, S.agents, S.hosts] = await Promise.all([api("/stats"), api("/projects"), api("/agents"), api("/hosts")]);
+  // A team login can't read board-wide stats or hosts; show the rest without them.
+  [S.stats, S.projects, S.agents, S.hosts] = await Promise.all([api("/stats").catch(() => ({})), api("/projects"), api("/agents"), api("/hosts").catch(() => [])]);
   renderChrome();
 }
 
@@ -990,7 +991,7 @@ async function startLive() {
     es.addEventListener("events", (m) => onEvents(JSON.parse(m.data)));
     return;
   }
-  let last = (await api("/stats")).last_event_id;
+  let last = (await api("/stats").catch(() => ({}))).last_event_id ?? ((await api("/events?limit=1"))[0]?.id || 0);
   setInterval(async () => {
     if (document.hidden) return;
     try {

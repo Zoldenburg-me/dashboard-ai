@@ -19,7 +19,7 @@ import mcp_server
 
 # Set AGENT_DASH_TOKEN when exposing the server publicly. Browsers log in with
 # HTTP Basic auth (any username, token as password); agents send
-# "Authorization: Bearer <token>".
+# "Authorization: Bearer <token>". A team token also logs into the browser, read-only.
 TOKEN = os.environ.get("AGENT_DASH_TOKEN", "")
 
 
@@ -82,7 +82,9 @@ def api(req):
 
 @route("GET", r"/api/config")
 def _config(req, q, body):
-    return {"stream": STREAMING, "store": "turso" if os.environ.get("TURSO_DATABASE_URL") else "sqlite"}
+    # Team logins can't open the board-wide stream, so their browser polls.
+    stream = STREAMING and req.ident["kind"] != "team"
+    return {"stream": stream, "store": "turso" if os.environ.get("TURSO_DATABASE_URL") else "sqlite"}
 
 
 @route("GET", r"/api/stats")
@@ -283,13 +285,17 @@ class Handler(BaseHTTPRequestHandler):
                 if team:
                     return {"kind": "team", **team}
             return None
-        if h.startswith("Basic "):  # browsers: master token only
+        if h.startswith("Basic "):  # browsers: the master token, or a team token read-only
             try:
                 given = base64.b64decode(h[6:]).decode().split(":", 1)[1]
             except (ValueError, IndexError):
                 return None
             if TOKEN and hmac.compare_digest(given.encode(), TOKEN.encode()):
                 return {"kind": "admin"}
+            if given.startswith("tk_"):
+                team = db.token_identity(conn(), given)
+                if team:
+                    return {"kind": "team", "browser": True, **team}
         return None
 
     def _dispatch(self, method):
@@ -306,12 +312,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         team = self.ident["kind"] == "team"
+        browser = self.ident.get("browser", False)
+        if browser and (method != "GET" or url.path == "/mcp"):
+            return self._send(403, {"error": "a team key in the browser is read-only"})
         if url.path == "/mcp":
             return self._mcp(method)
         if method == "GET" and url.path == "/api/stream" and STREAMING:
             return self._send(403, {"error": "team tokens can't use the live stream"}) if team else self._stream()
         if method == "GET" and not url.path.startswith("/api/"):
-            if team:
+            if team and not browser:
                 return self._send(403, {"error": "team tokens can't open the dashboard"})
             return self._static(url.path)
         q = {k: v[-1] for k, v in parse_qs(url.query).items()}
