@@ -115,7 +115,9 @@ class TeamScope:
 
     def get_task(self, conn, task_id):
         self._task(conn, task_id)
-        return db.get_task(conn, task_id)
+        t = db.get_task(conn, task_id)
+        t["events"] = db.list_events(conn, task=int(task_id), limit=100, team_id=self.team_id)
+        return t
 
     def list_events(self, conn, since=None, project=None, agent=None, task=None, limit=100):
         if project is not None:

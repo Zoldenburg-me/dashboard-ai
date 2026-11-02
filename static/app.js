@@ -59,6 +59,8 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
+// Failed writes (e.g. 403 for a read-only team login) show as a toast instead of failing silently.
+window.addEventListener("unhandledrejection", (e) => toast(e.reason?.message || "Request failed", true));
 function toast(msg, err = false) {
   const t = $("#toast");
   t.textContent = msg;

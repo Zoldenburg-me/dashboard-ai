@@ -3,6 +3,7 @@
     python -m unittest discover -s tests -v
 """
 import json
+import sqlite3
 import unittest
 import urllib.error
 import urllib.request
@@ -119,6 +120,15 @@ class TeamTokens(TeamCase):
         for path in ("/api/stats", "/api/hosts", "/api/teams", "/api/stream", "/"):
             self.assertEqual(self.as_team("GET", path)[0], 403, path)
         self.assertEqual(self.call("POST", "/api/teams", {"name": "x"}, auth="Bearer gb-1")[0], 403)
+
+    def test_task_detail_hides_events_outside_the_team(self):
+        tid = self.as_team("POST", "/api/tasks", {"project": "acme-proj", "title": "detail task"})[1]["id"]
+        with sqlite3.connect(self.db_path) as c:  # an internal event tied to the task but to no project
+            aid = c.execute("SELECT id FROM agents WHERE name='claudia'").fetchone()[0]
+            c.execute("INSERT INTO events (ts, agent_id, project_id, task_id, kind, message) VALUES (0, ?, NULL, ?, 'note', 'stray secret')",
+                      (aid, tid))
+        self.assertIn("stray secret", json.dumps(self.call("GET", f"/api/tasks/{tid}")[1]))
+        self.assertNotIn("stray secret", json.dumps(self.as_team("GET", f"/api/tasks/{tid}")[1]))
 
     def test_browser_login_is_read_only_and_scoped(self):
         web = basic(self.bound[7:])
