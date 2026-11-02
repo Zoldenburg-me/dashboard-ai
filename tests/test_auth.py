@@ -34,10 +34,11 @@ class ServerCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tmp.cleanup)
         cls.port = free_port()
+        cls.db_path = os.path.join(tmp.name, "a.db")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("AGENT_", "TURSO_"))}
         env.update(cls.ENV)
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(ROOT, "server.py"), "--port", str(cls.port), "--db", os.path.join(tmp.name, "a.db")],
+            [sys.executable, os.path.join(ROOT, "server.py"), "--port", str(cls.port), "--db", cls.db_path],
             env=env, stdout=subprocess.DEVNULL)
         cls.addClassCleanup(proc.wait)
         cls.addClassCleanup(proc.terminate)
